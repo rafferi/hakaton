@@ -43,7 +43,7 @@ class CsvStatementParser implements StatementParserInterface
 
         $firstLine = fgets($handle);
         if ($firstLine === false) {
-            return [];
+            return ['transactions' => [], 'data_rows' => 0];
         }
 
         $firstLine = $this->normalizeEncoding($firstLine);
@@ -57,7 +57,7 @@ class CsvStatementParser implements StatementParserInterface
         // Читаем заголовки
         $headerLine = fgetcsv($handle, 0, $delimiter);
         if ($headerLine === false) {
-            return [];
+            return ['transactions' => [], 'data_rows' => 0];
         }
 
         $header = array_map(
@@ -68,6 +68,7 @@ class CsvStatementParser implements StatementParserInterface
         $columnMap = $this->mapColumns($header);
 
         $transactions = [];
+        $dataRows = 0;
         $rowNumber = 1;
 
         while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
@@ -81,6 +82,10 @@ class CsvStatementParser implements StatementParserInterface
                 continue;
             }
 
+            // Считаем строки данных ДО попытки парсинга каждой строки,
+            // чтобы отличить пустой файл от нераспознаваемого формата.
+            $dataRows++;
+
             $transaction = $this->buildTransaction($row, $columnMap);
 
             if ($transaction !== null) {
@@ -88,7 +93,7 @@ class CsvStatementParser implements StatementParserInterface
             }
         }
 
-        return $transactions;
+        return ['transactions' => $transactions, 'data_rows' => $dataRows];
     }
 
     private function normalizeEncoding(string $text): string

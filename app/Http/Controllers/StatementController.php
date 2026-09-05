@@ -68,8 +68,12 @@ class StatementController extends Controller
         $result = $this->importService->import($request->file('file'));
 
         if ($result['statement'] === null) {
+            $message = $result['error'] === 'empty_file'
+                ? 'Файл пуст. Загрузите CSV-файл с хотя бы одной транзакцией.'
+                : 'Не удалось распознать ни одной транзакции. Проверьте формат файла (дата, описание, сумма).';
+
             return response()->json([
-                'message' => 'No transactions found in the uploaded file.',
+                'message' => $message,
             ], 422);
         }
 

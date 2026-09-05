@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Services;
@@ -15,20 +16,21 @@ class StatementImportService
         private StatementParserInterface $parser,
         private TransactionNormalizerService $normalizer,
         private TransactionCategorizerService $categorizer,
-    ) {
-    }
+    ) {}
 
     /**
-     * @return array{statement:?Statement, imported_transactions_count:int}
+     * @return array{statement:?Statement, imported_transactions_count:int, error:?string}
      */
     public function import(UploadedFile $file): array
     {
-        $rawTransactions = $this->parser->parse($file);
+        $parsed = $this->parser->parse($file);
+        $rawTransactions = $parsed['transactions'];
 
         if (empty($rawTransactions)) {
             return [
                 'statement' => null,
                 'imported_transactions_count' => 0,
+                'error' => $parsed['data_rows'] === 0 ? 'empty_file' : 'unrecognized_format',
             ];
         }
 
@@ -76,6 +78,7 @@ class StatementImportService
                 $row['statement_id'] = $statement->id;
                 $row['created_at'] = $now;
                 $row['updated_at'] = $now;
+
                 return $row;
             }, $preparedTransactions);
 
@@ -87,8 +90,8 @@ class StatementImportService
             return [
                 'statement' => $statement->fresh(),
                 'imported_transactions_count' => count($preparedTransactions),
+                'error' => null,
             ];
         });
     }
 }
-

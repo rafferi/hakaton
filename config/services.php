@@ -28,6 +28,18 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'gigachat' => [
+        'base_url' => env('GIGACHAT_BASE_URL', 'https://api.giga.chat'),
+        'auth_url' => env('GIGACHAT_AUTH_URL', 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth'),
+        'auth_key' => env('GIGACHAT_AUTH_KEY'),
+        'scope' => env('GIGACHAT_SCOPE', 'GIGACHAT_API_PERS'),
+        'model' => env('GIGACHAT_MODEL', 'GigaChat-2'),
+        'timeout' => (int) env('GIGACHAT_TIMEOUT', 30),
+        // env() возвращает строку, а "false" как строка — truthy,
+        // поэтому явное приведение к boolean обязательно.
+        'verify_ssl' => filter_var(env('GIGACHAT_VERIFY_SSL', true), FILTER_VALIDATE_BOOLEAN),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
