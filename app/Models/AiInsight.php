@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Models;
@@ -31,3 +30,4 @@ class AiInsight extends Model
         return $this->belongsTo(Statement::class);
     }
 }
+
