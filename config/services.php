@@ -34,6 +34,9 @@ return [
         'auth_key' => env('GIGACHAT_AUTH_KEY'),
         'scope' => env('GIGACHAT_SCOPE', 'GIGACHAT_API_PERS'),
         'model' => env('GIGACHAT_MODEL', 'GigaChat-2'),
+        // Vision нужна модель с поддержкой изображений (базовая GigaChat-2
+        // не подойдёт) — актуальное имя сверять с developers.sber.ru.
+        'vision_model' => env('GIGACHAT_VISION_MODEL', 'GigaChat-2-Max'),
         'timeout' => (int) env('GIGACHAT_TIMEOUT', 30),
         // env() возвращает строку, а "false" как строка — truthy,
         // поэтому явное приведение к boolean обязательно.

@@ -6,6 +6,8 @@ namespace App\Services\AI;
 
 use App\Exceptions\AiServiceException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response as HttpResponse;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -529,6 +531,281 @@ class GigaChatService
         }
 
         return trim($content);
+    }
+
+    /**
+     * Загружает файл в хранилище GigaChat (POST /files, multipart).
+     * Тот же OAuth-токен/SSL-флаг/таймауты, что и остальные вызовы.
+     * Возвращает file_id для attachments. Модель с vision затем
+     * вызывается отдельно через analyzeReceipt().
+     */
+    public function uploadFile(UploadedFile $file): string
+    {
+        $config = $this->config();
+        $baseUrl = rtrim((string) ($config['base_url'] ?? 'https://api.giga.chat'), '/');
+        $timeout = (int) ($config['timeout'] ?? 30);
+        $token = $this->getAccessToken();
+
+        $path = $file->getRealPath();
+
+        if ($path === false) {
+            throw new AiServiceException('Не удалось прочитать загруженный файл.', 422);
+        }
+
+        $response = $this->postReceiptFile($config, $token, $path, $file->getClientOriginalName());
+
+        if ($response->status() === 401) {
+            $this->forgetAccessToken();
+            Log::error('GigaChat file upload unauthorized, token cache cleared');
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        if (in_array($response->status(), [413, 415, 422], true)) {
+            Log::error('GigaChat file upload rejected the file', [
+                'status' => $response->status(),
+                'body' => mb_substr($response->body(), 0, 1000),
+            ]);
+
+            throw new AiServiceException(
+                'GigaChat отклонил файл (слишком большой или неподдерживаемый формат).',
+                422
+            );
+        }
+
+        if (! $response->successful()) {
+            Log::error('GigaChat file upload unexpected status', [
+                'status' => $response->status(),
+                'body' => mb_substr($response->body(), 0, 1000),
+            ]);
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        $fileId = $response->json('id');
+
+        if (! is_string($fileId) || trim($fileId) === '') {
+            Log::error('GigaChat file upload returned no file id', [
+                'body' => mb_substr($response->body(), 0, 1000),
+            ]);
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        return $fileId;
+    }
+
+    /**
+     * POST файла в хранилище GigaChat с одной повторной попыткой
+     * при сетевом сбое. Загрузка фото по флапающему VPN периодически
+     * рвётся cURL error 28 (см. логи), а повтор через секунды уже
+     * проходит. Ретраятся только ConnectionException — ответы API
+     * (401/413/...) детерминированы и обрабатываются вызывающим кодом.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    private function postReceiptFile(array $config, string $token, string $path, string $filename): HttpResponse
+    {
+        $baseUrl = rtrim((string) ($config['base_url'] ?? 'https://api.giga.chat'), '/');
+        $timeout = (int) ($config['timeout'] ?? 30);
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            try {
+                return Http::timeout($timeout)
+                    ->withOptions(['verify' => $this->verifySsl($config)])
+                    ->acceptJson()
+                    ->withToken($token)
+                    ->attach('file', file_get_contents($path), $filename)
+                    ->post($baseUrl.'/v1/files', ['purpose' => 'general']);
+            } catch (ConnectionException $e) {
+                Log::error('GigaChat file upload connection failed', [
+                    'attempt' => $attempt,
+                    'error' => $e->getMessage(),
+                ]);
+
+                if ($attempt === 2) {
+                    throw new AiServiceException(
+                        'Сервис распознавания недоступен. Попробуйте позже.',
+                        503
+                    );
+                }
+
+                Log::info('GigaChat file upload retrying once after connection failure');
+            }
+        }
+
+        throw new AiServiceException(
+            'Сервис распознавания недоступен. Попробуйте позже.',
+            503
+        );
+    }
+
+    /**
+     * Распознаёт чек по file_id через vision-модель (одно изображение
+     * на сообщение — ограничение API). Промпт требует строго JSON;
+     * парсинг — через робастный extractJson, как в analyze().
+     *
+     * @return array{date: string, merchant: string, amount: float}
+     */
+    public function analyzeReceipt(string $fileId): array
+    {
+        $config = $this->config();
+        $baseUrl = rtrim((string) ($config['base_url'] ?? 'https://api.giga.chat'), '/');
+        // Vision нужна модель с поддержкой изображений (базовая GigaChat-2
+        // не подойдёт) — имя настраивается через GIGACHAT_VISION_MODEL.
+        $model = (string) ($config['vision_model'] ?? 'GigaChat-2-Max');
+        $timeout = (int) ($config['timeout'] ?? 30);
+        $token = $this->getAccessToken();
+
+        $prompt = 'Изучи это изображение чека. Извлеки: дату покупки '
+            .'(формат YYYY-MM-DD, если не видна — сегодняшняя дата), название '
+            .'магазина, итоговую сумму чека (число). Верни ТОЛЬКО JSON: '
+            .'{"date": "...", "merchant": "...", "amount": число}. '
+            .'Если не можешь разобрать чек (нечитаемо, не похоже на чек) — '
+            .'верни {"error": "причина"}.';
+
+        try {
+            $response = Http::timeout($timeout)
+                ->withOptions(['verify' => $this->verifySsl($config)])
+                ->acceptJson()
+                ->withToken($token)
+                ->post($baseUrl.'/v1/chat/completions', [
+                    'model' => $model,
+                    'messages' => [
+                        [
+                            'role' => 'user',
+                            'content' => $prompt,
+                            'attachments' => [$fileId],
+                        ],
+                    ],
+                    'temperature' => 0.1,
+                    'max_tokens' => 500,
+                ]);
+        } catch (ConnectionException $e) {
+            Log::error('GigaChat receipt analysis connection failed', ['error' => $e->getMessage()]);
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        if ($response->status() === 401) {
+            $this->forgetAccessToken();
+            Log::error('GigaChat receipt analysis unauthorized, token cache cleared');
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        if (! $response->successful()) {
+            Log::error('GigaChat receipt analysis unexpected status', [
+                'status' => $response->status(),
+                'body' => mb_substr($response->body(), 0, 1000),
+            ]);
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        $content = $response->json('choices.0.message.content');
+
+        if (! is_string($content) || trim($content) === '') {
+            Log::error('GigaChat receipt analysis empty content', [
+                'body' => mb_substr($response->body(), 0, 1000),
+            ]);
+
+            throw new AiServiceException(
+                'Сервис распознавания недоступен. Попробуйте позже.',
+                503
+            );
+        }
+
+        Log::info('GigaChat raw receipt content', [
+            'raw' => mb_substr($content, 0, 2000),
+        ]);
+
+        $decoded = $this->extractJson($content);
+
+        if ($decoded === null) {
+            Log::error('GigaChat receipt returned invalid JSON', [
+                'raw' => mb_substr($content, 0, 2000),
+            ]);
+
+            throw new AiServiceException(
+                'Не удалось распознать чек: ответ модели не разобран.',
+                422
+            );
+        }
+
+        if (isset($decoded['error'])) {
+            throw new AiServiceException(
+                'Не удалось распознать чек: '.(string) $decoded['error'],
+                422
+            );
+        }
+
+        $amount = $decoded['amount'] ?? null;
+
+        if (! is_numeric($amount) || (float) $amount <= 0) {
+            Log::error('GigaChat receipt missing amount', [
+                'raw' => mb_substr($content, 0, 2000),
+            ]);
+
+            throw new AiServiceException(
+                'Не удалось распознать чек: в ответе нет итоговой суммы.',
+                422
+            );
+        }
+
+        $merchant = $decoded['merchant'] ?? null;
+
+        if (! is_string($merchant) || trim($merchant) === '') {
+            Log::error('GigaChat receipt missing merchant', [
+                'raw' => mb_substr($content, 0, 2000),
+            ]);
+
+            throw new AiServiceException(
+                'Не удалось распознать чек: в ответе нет названия магазина.',
+                422
+            );
+        }
+
+        return [
+            'date' => $this->normalizeReceiptDate($decoded['date'] ?? null),
+            'merchant' => trim($merchant),
+            'amount' => round((float) $amount, 2),
+        ];
+    }
+
+    /**
+     * Дата чека: принимаем только корректный YYYY-MM-DD, иначе —
+     * сегодняшняя дата (как велит и сам промпт модели).
+     */
+    private function normalizeReceiptDate(mixed $value): string
+    {
+        if (is_string($value) && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m)
+            && checkdate((int) $m[2], (int) $m[3], (int) $m[1])
+        ) {
+            return $value;
+        }
+
+        Log::info('Receipt date fallback to today', ['received' => $value]);
+
+        return date('Y-m-d');
     }
 
     private function stripCodeFences(string $content): string

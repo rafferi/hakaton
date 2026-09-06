@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AiInsightController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\StatementController;
 use Illuminate\Support\Facades\Route;
 
@@ -16,6 +17,8 @@ Route::prefix('statements')->group(function () {
     Route::get('/{statement}/ai/insights', [AiInsightController::class, 'insights']);
     Route::post('/{statement}/ai/analyze', [AiInsightController::class, 'analyze']);
     Route::post('/{statement}/savings-plan', [AiInsightController::class, 'savingsPlan']);
+    Route::post('/{statement}/receipts/scan', [ReceiptController::class, 'scan']);
+    Route::post('/{statement}/receipts/confirm', [ReceiptController::class, 'confirm']);
     Route::delete('/{statement}', [StatementController::class, 'destroy']);
 });
 
