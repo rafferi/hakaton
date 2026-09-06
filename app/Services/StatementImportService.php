@@ -66,6 +66,8 @@ class StatementImportService
 
         return DB::transaction(function () use ($file, $preparedTransactions, $minDate, $maxDate) {
             $statement = Statement::create([
+                // Без авторизации всегда null (демо-бакет) — это ожидаемо.
+                'user_id' => auth()->id(),
                 'file_name' => $file->getClientOriginalName(),
                 'file_type' => 'csv',
                 'period_from' => $minDate,

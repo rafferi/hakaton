@@ -23,7 +23,7 @@ class StatementController extends Controller
 
     public function index(): AnonymousResourceCollection
     {
-        $statements = Statement::query()
+        $statements = Statement::forCurrentUser()
             ->withCount('transactions')
             ->orderByDesc('id')
             ->paginate(20);

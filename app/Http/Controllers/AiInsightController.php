@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Exceptions\AiServiceException;
+use App\Http\Requests\SavingsPlanRequest;
 use App\Http\Resources\AiInsightResource;
 use App\Models\Statement;
 use App\Services\AI\AiAnalysisService;
 use App\Services\AI\InsightPersistenceService;
+use App\Services\AI\SavingsPlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -57,5 +59,29 @@ class AiInsightController extends Controller
                 $persistence->forStatement($statement)
             ),
         ]);
+    }
+
+    /**
+     * POST /api/statements/{statement}/savings-plan
+     *
+     * Интерактивный план "Хочу экономить X": нигде не сохраняется.
+     */
+    public function savingsPlan(
+        Statement $statement,
+        SavingsPlanRequest $request,
+        SavingsPlanService $planner,
+    ): JsonResponse {
+        try {
+            $plan = $planner->buildPlan(
+                $statement,
+                (float) $request->validated()['target_monthly_saving']
+            );
+        } catch (AiServiceException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], $e->getStatus());
+        }
+
+        return response()->json($plan);
     }
 }
