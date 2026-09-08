@@ -64,13 +64,10 @@ class InsightPersistenceService
     public const EXCLUDED_CATEGORIES = ['прочее', 'other', 'переводы', 'перевод', 'transfer', 'transfers'];
 
     /**
-     * Маркеры доходных категорий для tier-2 ранжирования (когда debit-строк
-     * нет вообще и приходится опираться на имена из by_category).
-     * Зеркалит правило 'Зарплата' из config/categories.php
-     * (TransactionCategorizerService), плюс общие слова; матчинг —
-     * подстрокой без учёта регистра, как в самом категоризаторе.
+     * Дефолт маркеров доходности на случай отсутствия config-секции.
+     * Основной источник — config('categories.income'), см. isIncomeLike().
      */
-    private const INCOME_KEYWORDS = ['зарплата', 'з/п', 'зпл', 'salary', 'аванс', 'доход', 'income'];
+    private const INCOME_KEYWORDS_FALLBACK = ['зарплата'];
 
     /**
      * Возможные альтернативные имена ключей верхнего уровня от модели.
@@ -324,12 +321,29 @@ class InsightPersistenceService
             && ! in_array($normalized, $transferCategories, true);
     }
 
+    /**
+     * Доходна ли категория: точное имя из config income.categories
+     * ИЛИ подстрока-маркер из config income.keywords (как в категоризаторе).
+     * Единый источник — config/categories.php, секция 'income'.
+     */
     private function isIncomeLike(string $name): bool
     {
         $normalized = mb_strtolower(trim($name));
 
-        foreach (self::INCOME_KEYWORDS as $keyword) {
-            if (str_contains($normalized, $keyword)) {
+        /** @var list<string> $incomeNames */
+        $incomeNames = config('categories.income.categories', []);
+        foreach ($incomeNames as $incomeName) {
+            if ($normalized === mb_strtolower(trim((string) $incomeName))) {
+                return true;
+            }
+        }
+
+        /** @var list<string> $keywords */
+        $keywords = config('categories.income.keywords', self::INCOME_KEYWORDS_FALLBACK);
+        foreach ($keywords as $keyword) {
+            $keyword = mb_strtolower(trim((string) $keyword));
+
+            if ($keyword !== '' && str_contains($normalized, $keyword)) {
                 return true;
             }
         }
@@ -348,7 +362,7 @@ class InsightPersistenceService
         }
 
         $top = $ranking[0];
-        $amountFormatted = number_format($top['amount'], 2, '.', '');
+        $amountFormatted = $this->formatMoney($top['amount']);
 
         Log::info('GigaChat fallback insight synthesized', [
             'statement_id' => $statement->id,
@@ -360,13 +374,28 @@ class InsightPersistenceService
                 'type' => 'главная_категория',
                 'title' => "Главная категория трат: {$top['name']}",
                 'description' => $top['percentage'] !== null
-                    ? "{$top['name']} — {$amountFormatted} руб. ({$this->formatPercent($top['percentage'])}% расходов)."
-                    : "{$top['name']} — {$amountFormatted} руб.",
+                    ? "{$top['name']} — {$amountFormatted} ({$this->formatPercent($top['percentage'])}% расходов)."
+                    : "{$top['name']} — {$amountFormatted}",
                 'data' => [],
                 'potential_saving' => null,
             ],
             'category' => $top['name'],
         ];
+    }
+
+    /**
+     * Русское написание суммы для человекочитаемых fallback-строк:
+     * пробел как разделитель тысяч, знак ₽, дробная часть — только
+     * значимая (2994.00 → «2 994 ₽», 898.20 → «898,2 ₽»).
+     * Только форматирование: формулы и валидация не тронуты.
+     */
+    private function formatMoney(float $value): string
+    {
+        $formatted = number_format($value, 2, ',', ' ');
+        $formatted = (string) preg_replace('/,00$/', '', $formatted);
+        $formatted = (string) preg_replace('/(,\d)0$/', '$1', $formatted);
+
+        return $formatted.' ₽';
     }
 
     private function formatPercent(float $value): string
@@ -405,7 +434,7 @@ class InsightPersistenceService
         $percentage = 20.0;
         $monthly = round($best['amount'] * ($percentage / 100), 2);
         $annual = round($monthly * 12, 2);
-        $amountFormatted = number_format($best['amount'], 2, '.', '');
+        $amountFormatted = $this->formatMoney($best['amount']);
 
         Log::info('GigaChat fallback recommendation synthesized', [
             'statement_id' => $statement->id,
@@ -415,7 +444,7 @@ class InsightPersistenceService
         return [
             'type' => 'recommendation',
             'title' => "Высокие траты на {$best['name']}",
-            'description' => "{$best['name']} — {$amountFormatted} руб.",
+            'description' => "{$best['name']} — {$amountFormatted}",
             'data' => [
                 'recommendation' => "Проанализируйте траты в категории «{$best['name']}» и сократите необязательные покупки.",
                 'priority' => 'medium',

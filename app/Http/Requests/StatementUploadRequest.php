@@ -28,8 +28,8 @@ class StatementUploadRequest extends FormRequest
             'file' => [
                 'required',
                 'file',
-                'extensions:csv,txt',
-                'max:5120', // 5MB в KB
+                'extensions:csv,txt,pdf',
+                'max:10240', // 10MB в KB — PDF обычно тяжелее CSV
             ],
         ];
     }
@@ -39,8 +39,8 @@ class StatementUploadRequest extends FormRequest
         return [
             'file.required' => 'Файл выписки обязателен для загрузки.',
             'file.file' => 'Загружаемый объект должен быть файлом.',
-            'file.extensions' => 'Допустимы только файлы формата CSV.',
-            'file.max' => 'Максимальный размер файла — 5 МБ.',
+            'file.extensions' => 'Допустимы файлы формата CSV или PDF.',
+            'file.max' => 'Максимальный размер файла — 10 МБ.',
         ];
     }
 }

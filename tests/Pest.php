@@ -1,6 +1,8 @@
 <?php
 
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /*
@@ -47,4 +49,21 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/*
+ * Создаёт пользователя и аутентифицирует его через Sanctum.
+ * Все api-маршруты закрыты auth:sanctum, а чтения идут через
+ * Statement::scopeForCurrentUser() — без этого контекст bucket'а
+ * не совпадёт с user_id создаваемых statements и тесты увидят пустоту.
+ * Хелперы make*Statement() в feature-тестах ставят user_id = auth()->id(),
+ * поэтому каждый тест обязан вызвать actingAsNewUser() первым делом.
+ */
+function actingAsNewUser(array $attributes = []): User
+{
+    $user = User::factory()->create($attributes);
+
+    Sanctum::actingAs($user);
+
+    return $user;
 }

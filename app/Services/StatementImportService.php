@@ -7,23 +7,35 @@ namespace App\Services;
 use App\Contracts\StatementParserInterface;
 use App\Models\Statement;
 use App\Models\Transaction;
+use App\Services\Parsers\CsvStatementParser;
+use App\Services\Parsers\PdfStatementParser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
 class StatementImportService
 {
     public function __construct(
-        private StatementParserInterface $parser,
         private TransactionNormalizerService $normalizer,
         private TransactionCategorizerService $categorizer,
     ) {}
+
+    private function parserFor(UploadedFile $file): StatementParserInterface
+    {
+        $ext = strtolower(pathinfo($file->getClientOriginalName(), PATHINFO_EXTENSION));
+
+        return match ($ext) {
+            'pdf' => new PdfStatementParser,
+            default => new CsvStatementParser,
+        };
+    }
 
     /**
      * @return array{statement:?Statement, imported_transactions_count:int, error:?string}
      */
     public function import(UploadedFile $file): array
     {
-        $parsed = $this->parser->parse($file);
+        $parser = $this->parserFor($file);
+        $parsed = $parser->parse($file);
         $rawTransactions = $parsed['transactions'];
 
         if (empty($rawTransactions)) {
@@ -69,7 +81,7 @@ class StatementImportService
                 // Без авторизации всегда null (демо-бакет) — это ожидаемо.
                 'user_id' => auth()->id(),
                 'file_name' => $file->getClientOriginalName(),
-                'file_type' => 'csv',
+                'file_type' => strtolower(pathinfo($file->getClientOriginalName(), PATHINFO_EXTENSION)),
                 'period_from' => $minDate,
                 'period_to' => $maxDate,
                 'transactions_count' => count($preparedTransactions),

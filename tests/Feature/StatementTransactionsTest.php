@@ -6,6 +6,7 @@ use App\Models\Transaction;
 function makeStatementList(array $rows): Statement
 {
     $statement = Statement::create([
+        'user_id' => auth()->id(),
         'file_name' => 'transactions-test.csv',
         'file_type' => 'csv',
     ]);
@@ -35,6 +36,8 @@ function seedTransactions(): Statement
 }
 
 test('transactions endpoint returns paginated list sorted by date desc', function () {
+    actingAsNewUser();
+
     $statement = seedTransactions();
 
     $response = $this->getJson("/api/statements/{$statement->id}/transactions");
@@ -56,6 +59,8 @@ test('transactions endpoint returns paginated list sorted by date desc', functio
 });
 
 test('transactions endpoint filters by category and type', function () {
+    actingAsNewUser();
+
     $statement = seedTransactions();
 
     $byCategory = $this->getJson("/api/statements/{$statement->id}/transactions?category=".urlencode('Продукты'));
@@ -71,6 +76,8 @@ test('transactions endpoint filters by category and type', function () {
 });
 
 test('transactions endpoint filters by date range, amount range and search', function () {
+    actingAsNewUser();
+
     $statement = seedTransactions();
 
     // date_from без date_to — валидно
@@ -91,6 +98,8 @@ test('transactions endpoint filters by date range, amount range and search', fun
 });
 
 test('transactions endpoint paginates and validates input', function () {
+    actingAsNewUser();
+
     $statement = seedTransactions();
 
     $page = $this->getJson("/api/statements/{$statement->id}/transactions?per_page=2&page=2");
@@ -118,6 +127,8 @@ test('transactions endpoint paginates and validates input', function () {
 });
 
 test('transactions endpoint returns empty data when nothing matches', function () {
+    actingAsNewUser();
+
     $statement = seedTransactions();
 
     $empty = $this->getJson("/api/statements/{$statement->id}/transactions?category=NoSuchCategory");
@@ -125,7 +136,7 @@ test('transactions endpoint returns empty data when nothing matches', function (
     $empty->assertJsonCount(0, 'data');
     $empty->assertJsonPath('meta.total', 0);
 
-    $emptyStatement = Statement::create(['file_name' => 'empty.csv', 'file_type' => 'csv']);
+    $emptyStatement = Statement::create(['user_id' => auth()->id(), 'file_name' => 'empty.csv', 'file_type' => 'csv']);
     $noTx = $this->getJson("/api/statements/{$emptyStatement->id}/transactions");
     $noTx->assertOk();
     $noTx->assertJsonCount(0, 'data');

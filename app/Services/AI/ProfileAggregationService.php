@@ -8,6 +8,7 @@ use App\Models\AiInsight;
 use App\Models\Statement;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Агрегированная сводка по ВСЕМ выпискам текущего скоупа
@@ -163,6 +164,68 @@ class ProfileAggregationService
             'average_monthly_expenses' => round($totalExpenses / $months, 2),
             'recent_insights' => array_values($recentInsights),
         ];
+    }
+
+    /**
+     * Тренд доходов/расходов по календарным месяцам (YYYY-MM),
+     * агрегированный по ВСЕМ выпискам текущего скоупа
+     * (Statement::forCurrentUser() — демо-бакет сейчас, per-user позже).
+     * Только агрегирующий SQL-запрос, без загрузки транзакций в PHP.
+     *
+     * Критерии income/expenses — те же, что везде в проекте:
+     * доход = income|credit, расход = expense|debit (через ABS, т.к.
+     * расходы хранятся со знаком минус). Переводы (transfer) не входят
+     * ни в income, ни в expenses, но входят в transactions_count.
+     * Месяцы без транзакций в ответ не попадают (без нулевых строк).
+     * Сортировка — по month по возрастанию. Нет транзакций — [].
+     *
+     * @return list<array{month: string, income: float, expenses: float, balance: float, transactions_count: int}>
+     */
+    public function buildMonthlyTrend(): array
+    {
+        $monthExpr = $this->monthExpression();
+        $incomeList = $this->quotedList(self::INCOME_TYPES);
+        $expenseList = $this->quotedList(self::EXPENSE_TYPES);
+
+        $rows = Transaction::query()
+            // Тот же скоуп, что в buildAggregatedProfile(), но подзапросом:
+            // один SQL без выгрузки id выписок в PHP; чужие бакеты не подмешиваются.
+            ->whereIn('statement_id', Statement::forCurrentUser()->select('id'))
+            ->selectRaw("{$monthExpr} AS month")
+            ->selectRaw("SUM(CASE WHEN type IN ({$incomeList}) THEN amount ELSE 0 END) AS income_sum")
+            ->selectRaw("SUM(CASE WHEN type IN ({$expenseList}) THEN ABS(amount) ELSE 0 END) AS expense_sum")
+            ->selectRaw('COUNT(*) AS transactions_count')
+            ->groupByRaw($monthExpr)
+            ->orderBy('month')
+            ->get();
+
+        return $rows->map(fn ($row): array => [
+            'month' => (string) $row->month,
+            'income' => (float) ($row->income_sum ?? 0),
+            'expenses' => (float) ($row->expense_sum ?? 0),
+            'balance' => (float) ($row->income_sum ?? 0) - (float) ($row->expense_sum ?? 0),
+            'transactions_count' => (int) ($row->transactions_count ?? 0),
+        ])->all();
+    }
+
+    /**
+     * Выражение "календарный месяц YYYY-MM из transactions.date"
+     * с учётом драйвера БД (тот же приём, что weekendCondition()
+     * в AnalyticsService).
+     *
+     * date_trunc('month', date) здесь не годится: он возвращает
+     * timestamp (не строку YYYY-MM, нужен лишний каст/формат), а в
+     * тестовой sqlite его вообще нет. substr(date, 1, 7) тоже не
+     * портируем: в pgsql date ≠ text и требует явного каста.
+     * Поэтому: TO_CHAR для pgsql, strftime для sqlite.
+     */
+    private function monthExpression(): string
+    {
+        if (DB::getDriverName() === 'pgsql') {
+            return "TO_CHAR(transactions.date, 'YYYY-MM')";
+        }
+
+        return "strftime('%Y-%m', transactions.date)";
     }
 
     private function isUsableCategory(string $name, array $transferCategories): bool

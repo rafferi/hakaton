@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ManualTransactionRequest;
 use App\Http\Requests\StatementTransactionsRequest;
 use App\Http\Requests\StatementUploadRequest;
 use App\Http\Resources\StatementResource;
@@ -11,6 +12,7 @@ use App\Http\Resources\TransactionResource;
 use App\Models\Statement;
 use App\Services\AnalyticsService;
 use App\Services\StatementImportService;
+use App\Services\TransactionManualCreateService;
 use App\Services\TransactionQueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -33,6 +35,8 @@ class StatementController extends Controller
 
     public function show(Statement $statement): StatementResource
     {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         return new StatementResource(
             $statement->loadCount('transactions')
         );
@@ -40,6 +44,8 @@ class StatementController extends Controller
 
     public function destroy(Statement $statement): JsonResponse
     {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         $statement->delete();
 
         return response()->json([
@@ -50,6 +56,8 @@ class StatementController extends Controller
 
     public function analytics(Statement $statement, AnalyticsService $analytics): JsonResponse
     {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         return response()->json($analytics->analyze($statement));
     }
 
@@ -58,9 +66,26 @@ class StatementController extends Controller
         StatementTransactionsRequest $request,
         TransactionQueryService $query,
     ): AnonymousResourceCollection {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         return TransactionResource::collection(
             $query->paginate($statement, $request->validated())
         );
+    }
+
+    public function storeManualTransaction(
+        Statement $statement,
+        ManualTransactionRequest $request,
+        TransactionManualCreateService $creator,
+    ): JsonResponse {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
+        $transaction = $creator->create($statement, $request->validated());
+
+        return response()->json([
+            'data' => new TransactionResource($transaction),
+            'message' => 'Транзакция добавлена',
+        ], 201);
     }
 
     public function upload(StatementUploadRequest $request): JsonResponse

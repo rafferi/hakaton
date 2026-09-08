@@ -22,6 +22,8 @@ class ReceiptController extends Controller
         ReceiptScanRequest $request,
         ReceiptScanService $scanner,
     ): JsonResponse {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         try {
             $preview = $scanner->scan($request->file('receipt'));
         } catch (AiServiceException $e) {
@@ -41,6 +43,8 @@ class ReceiptController extends Controller
         ReceiptConfirmRequest $request,
         ReceiptScanService $scanner,
     ): JsonResponse {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         $transaction = $scanner->confirm($statement, $request->validated());
 
         return response()->json([

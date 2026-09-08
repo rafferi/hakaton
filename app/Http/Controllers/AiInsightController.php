@@ -28,6 +28,8 @@ class AiInsightController extends Controller
         Request $request,
         AiAnalysisService $analysis,
     ): JsonResponse {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         try {
             $result = $analysis->analyzeStatement(
                 $statement,
@@ -54,6 +56,8 @@ class AiInsightController extends Controller
         Statement $statement,
         InsightPersistenceService $persistence,
     ): JsonResponse {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         return response()->json([
             'data' => AiInsightResource::collection(
                 $persistence->forStatement($statement)
@@ -71,6 +75,8 @@ class AiInsightController extends Controller
         SavingsPlanRequest $request,
         SavingsPlanService $planner,
     ): JsonResponse {
+        $statement = Statement::forCurrentUser()->findOrFail($statement->id);
+
         try {
             $plan = $planner->buildPlan(
                 $statement,

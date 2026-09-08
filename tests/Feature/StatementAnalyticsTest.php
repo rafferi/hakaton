@@ -7,6 +7,7 @@ use App\Services\AnalyticsService;
 function makeStatementWithTransactions(array $rows): Statement
 {
     $statement = Statement::create([
+        'user_id' => auth()->id(),
         'file_name' => 'analytics-test.csv',
         'file_type' => 'csv',
     ]);
@@ -25,6 +26,8 @@ function makeStatementWithTransactions(array $rows): Statement
 }
 
 test('analytics calculates totals and by_category', function () {
+    actingAsNewUser();
+
     // 2026-09-05 — суббота, 2026-09-06 — воскресенье, 2026-09-07 — понедельник.
     $statement = makeStatementWithTransactions([
         ['date' => '2026-09-07', 'amount' => 10000, 'type' => 'credit', 'raw_description' => 'Salary', 'category' => 'Зарплата'],
@@ -57,6 +60,8 @@ test('analytics calculates totals and by_category', function () {
 });
 
 test('analytics timeline is cumulative and extras split weekend', function () {
+    actingAsNewUser();
+
     $statement = makeStatementWithTransactions([
         ['date' => '2026-09-07', 'amount' => 10000, 'type' => 'credit', 'raw_description' => 'Salary', 'category' => 'Зарплата'],
         ['date' => '2026-09-07', 'amount' => -3000, 'type' => 'debit', 'raw_description' => 'Groceries', 'category' => 'Продукты'],
@@ -89,7 +94,10 @@ test('analytics timeline is cumulative and extras split weekend', function () {
 });
 
 test('analytics returns zeros for empty statement', function () {
+    actingAsNewUser();
+
     $statement = Statement::create([
+        'user_id' => auth()->id(),
         'file_name' => 'empty.csv',
         'file_type' => 'csv',
     ]);
@@ -113,6 +121,8 @@ test('analytics returns zeros for empty statement', function () {
 });
 
 test('analytics endpoint returns json for statement', function () {
+    actingAsNewUser();
+
     $statement = makeStatementWithTransactions([
         ['date' => '2026-09-07', 'amount' => 5000, 'type' => 'income', 'raw_description' => 'Salary', 'category' => 'Зарплата'],
     ]);

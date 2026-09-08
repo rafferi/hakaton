@@ -7,6 +7,7 @@ namespace App\Services\AI;
 use App\Models\Statement;
 use App\Models\Transaction;
 use App\Services\TransactionCategorizerService;
+use App\Services\TransactionManualCreateService;
 use Illuminate\Http\UploadedFile;
 
 /**
@@ -18,6 +19,7 @@ class ReceiptScanService
     public function __construct(
         private GigaChatService $gigachat,
         private TransactionCategorizerService $categorizer,
+        private TransactionManualCreateService $manual,
     ) {}
 
     /**
@@ -44,27 +46,19 @@ class ReceiptScanService
 
     /**
      * Шаг 2: подтверждённые (возможно отредактированные) данные → Transaction.
+     * Чек — всегда расход: делегирует общему сервису с type='debit'.
      *
      * @param  array{date: string, merchant: string, amount: float, category: string}  $data
      */
     public function confirm(Statement $statement, array $data): Transaction
     {
-        $transaction = Transaction::create([
-            'statement_id' => $statement->id,
+        return $this->manual->create($statement, [
             'date' => $data['date'],
+            'description' => $data['merchant'],
             'amount' => $data['amount'],
-            'type' => 'debit',
-            'raw_description' => $data['merchant'],
-            'normalized_description' => $data['merchant'],
-            'merchant' => $data['merchant'],
-            'recipient' => null,
             'category' => $data['category'],
-            // Подтверждено пользователем вручную — максимальная уверенность.
-            'category_confidence' => 1.0,
+            'type' => 'debit',
+            'merchant' => $data['merchant'],
         ]);
-
-        $statement->increment('transactions_count');
-
-        return $transaction;
     }
 }
